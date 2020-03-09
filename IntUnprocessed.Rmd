@@ -4,11 +4,9 @@ output: html_document
 ---
 
 ```{r}
+#pushing to try develop
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
-
-
 ```{r}
 # SEURAT WORKFLOW (w/tSNE): https://satijalab.org/seurat/v3.1/pbmc3k_tutorial.html
 
@@ -200,8 +198,3 @@ neutrophils.anchors <- FindTransferAnchors(reference = neutrophils.integrated, q
 predictions <- TransferData(anchorset = neutrophils.anchors, refdata = neutrophils.integrated$group, dims = 1:30)
 neutrophils.query <- AddMetaData(neutrophil.query, metadata = predictions)
 ```
-
-
-
-
-
