@@ -1,0 +1,207 @@
+---
+title: "Integrating multiple unprocessed data sets using Seurat and labeling with SingleR"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+# SEURAT WORKFLOW (w/tSNE): https://satijalab.org/seurat/v3.1/pbmc3k_tutorial.html
+
+library(dplyr)
+library(Seurat)
+```
+
+```{r}
+# reading in the (unprocessed) smaller data sets (which will be integrated later) as dgCMatrix objects using the Read10X function, then converting the data sets into Seurat objects so that they can be manipulated according to the Seurat workflow
+
+tumor.data <- Read10X(data.dir = "/Users/liammagee/Desktop/R stuff/tumorSet/1374-tumor/filtered_feature_bc_matrix")
+tumor <- CreateSeuratObject(counts = tumor.data, project = "tumor", min.cells = 3, min.features = 200)
+
+healthy.data <- Read10X(data.dir = "/Users/liammagee/Desktop/R stuff/tumorSet/1336-healthy/filtered_feature_bc_matrix")
+healthy <- CreateSeuratObject(counts = healthy.data, project = "healthy", min.cells = 3, min.features = 200)
+
+adjacent.data <- Read10X(data.dir = "/Users/liammagee/Desktop/R stuff/tumorSet/1374-adjacent/filtered_feature_bc_matrix")
+adjacent <- CreateSeuratObject(counts = adjacent.data, project = "adjacent", min.cells = 3, min.features = 200) 
+
+contralateral.data <- Read10X(data.dir = "/Users/liammagee/Desktop/R stuff/tumorSet/1374-contralateral/filtered_feature_bc_matrix")
+contralateral <- CreateSeuratObject(counts = contralateral.data, project = "contralateral", min.cells = 3, min.features = 200) 
+
+# merging the data sets into one Seurat object
+IntMetastasis.seu <- merge(tumor, y = c(healthy, adjacent, contralateral), add.cell.ids = c("tumor", "healthy", "adjacent", "contralateral"))
+```
+
+```{r}
+# selecting cells for further analysis, done here by eliminating cells with too high or too low RNA feature reads, or with mtDNA contamination
+IntMetastasis.seu[["percent.mt"]] <- PercentageFeatureSet(IntMetastasis.seu, pattern = "^MT-")
+IntMetastasis.seu <- subset(IntMetastasis.seu, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+```
+
+```{r}
+# normalizing the data, finding variable features and scaling the data
+IntMetastasis.seu <- NormalizeData(IntMetastasis.seu)
+IntMetastasis.seu <- FindVariableFeatures(IntMetastasis.seu, selection.method = "vst", nfeatures = 2000)
+all.genes <- rownames(IntMetastasis.seu)
+IntMetastasis.seu <- ScaleData(IntMetastasis.seu, features = all.genes)
+```
+
+```{r}
+# linear dimensional reduction
+IntMetastasis.seu <- RunPCA(IntMetastasis.seu)
+
+# clustering the data
+IntMetastasis.seu <- FindNeighbors(IntMetastasis.seu, dims = 1:10)
+IntMetastasis.seu <- FindClusters(IntMetastasis.seu, resolution = 0.5)
+
+# non-linear dimensional reduction (UMAP or tSNE)
+IntMetastasis.seu <- RunTSNE(IntMetastasis.seu)
+```
+
+```{r}
+# saving the integrated and processed data for future reference (this way, the computationally intensive above code only needs to be run once unless it needs to be altered)
+saveRDS(IntMetastasis.seu, file = "/Users/liammagee/Desktop/R stuff/tumorSet/IntMetastasis.rds")
+```
+
+```{r}
+# SINGLER WORKFLOW https://bioconductor.org/packages/devel/bioc/vignettes/SingleR/inst/doc/SingleR.html
+
+library(scRNAseq)
+library(scater)
+library(SingleR)
+```
+
+
+```{r}
+# loading in our reference data set, which will be used to label the test data set (the merged object created earlier)
+ImmGenRef <- ImmGenData()
+ImmGenRef
+```
+```{r}
+# reading in test data (from the previously created file for the integrated data)
+IntMetastasis <- readRDS(file = "/Users/liammagee/Desktop/R stuff/tumorSet/IntMetastasis.rds")
+
+# SingleR requires a SingleCellExperiment object
+IntMetastasis.sce <- as.SingleCellExperiment(IntMetastasis)
+
+# normalizing the data through SingleR
+IntMetastasis.sce <- logNormCounts(IntMetastasis.sce)
+```
+
+
+```{r}
+# running SingleR, passing in the test and reference data sets, as well as the labels from the reference data
+pred.IntMetastasis.sce <- SingleR(test = IntMetastasis.sce, ref = ImmGenRef, labels = ImmGenRef$label.main)
+pred.IntMetastasis.sce
+```
+```{r}
+# printing a table w/the labels from the reference data provides an easy way of verifying the data's accuracy
+table(pred.IntMetastasis.sce$labels)
+```
+```{r}
+# assigning names to the individual clusters and creating a tSNE plot (note: this process must first be done without labeling the clusters, in order to see what the cluster names are. the cluster names from this initial run are then added in to all future runs.)
+
+IntMetastasis[["SingleR.labels"]] <- pred.IntMetastasis.sce$labels
+new.cluster.ids <- c("B cells", "B cells, pro", "Basophils", "DC", "Endothelial cells", "Eosinophils",  "Epithelial cells", "Fibroblasts", "ILC", "Macrophages", "Mast cells", "Microglia", "Monocytes", "Neutrophils", "NK cells", "NKT", "Stem cells", "Stromal cells", "T cells", "Tgd")
+names(new.cluster.ids) <- levels(IntMetastasis)
+TSNEPlot(IntMetastasis, label = TRUE, pt.size = 0.5, group.by = "SingleR.labels") + NoLegend()
+```
+```{r}
+#Original attempt:
+# WhichCells(IntMetastasis,Idents = "Neutrophils")
+# neutrophils <- as.matrix(GetAssayData(IntMetastasis, slot = "counts")[, WhichCells(IntMetastasis, Idents = "Neutrophils")])
+# neutrophils.seu <- CreateSeuratObject(counts = neutrophils, project = "justNeutros", min.cells = 3, min.features = 200)
+
+#Github idea:
+#neutrophils.seu <- IntMetastasis[, IntMetastasis$labels == "Neutrophils"]
+
+#Dvir idea:
+#neutrophilNames <- names(IntMetastasis$SingleR.labels)["SingleR.labels" %in% c('Neutrophils')]
+#neutrophils.seu <- IntMetastasis[,neutrophilNames]
+
+#Combining Dvir and GitHub:
+neutrophils.seu <- IntMetastasis[,IntMetastasis$SingleR.labels == "Neutrophils"]
+```
+```{r}
+neutrophils.seu <- NormalizeData(neutrophils.seu)
+neutrophils.seu <- FindVariableFeatures(neutrophils.seu, selection.method = "vst", nfeatures = 2000)
+all.genes2 <- rownames(neutrophils.seu)
+neutrophils.seu <- ScaleData(neutrophils.seu, features = all.genes2)
+
+neutrophils.seu <- RunPCA(neutrophils.seu)
+
+# clustering the data
+neutrophils.seu <- FindNeighbors(neutrophils.seu, dims = 1:10)
+neutrophils.seu <- FindClusters(neutrophils.seu, resolution = 0.5)
+
+# non-linear dimensional reduction (UMAP or tSNE)
+neutrophils.seu <- RunTSNE(neutrophils.seu)
+
+```
+```{r}
+saveRDS(neutrophils.seu, file = "/Users/liammagee/Desktop/R stuff/tumorSet/Neutrophils.rds")
+
+```
+```{r}
+neutrophils.seu <- readRDS(file = "/Users/liammagee/Desktop/R stuff/tumorSet/Neutrophils.rds")
+```
+```{r}
+TSNEPlot(neutrophils.seu, label = TRUE, pt.size = 0.5) + NoLegend()
+```
+
+```{r}
+groups <- sample(c("healthy", "adjacent", "contralateral", "tumor"), size = 25633, replace = TRUE)
+names(groups) <- colnames(neutrophils.seu)
+neutrophils.seu <- AddMetaData(object = neutrophils.seu, metadata = groups, col.name = "group")
+obj.list <- SplitObject(neutrophils.seu, split.by = "group")
+```
+```{r}
+TSNEPlot(neutrophils.seu, label = TRUE, pt.size = 0.5) + NoLegend()
+```
+
+```{r}
+reference.list <- obj.list[c("healthy", "adjacent", "contralateral", "tumor")]
+neutrophils.anchors <- FindIntegrationAnchors(object.list = reference.list, dims = 1:10)
+```
+```{r}
+neutrophils.integrated <- IntegrateData(anchorset = neutrophils.anchors, dims = 1:10)
+```
+```{r}
+library(ggplot2)
+library(cowplot)
+DefaultAssay(neutrophils.integrated) <- "integrated"
+neutrophils.integrated <- ScaleData(neutrophils.integrated, verbose = FALSE)
+neutrophils.integrated <- RunPCA(neutrophils.integrated, npcs = 30, verbose = FALSE)
+neutrophils.integrated <- FindNeighbors(neutrophils.integrated, dims = 1:10)
+neutrophils.integrated <- FindClusters(neutrophils.integrated, dims = 1:10)
+neutrophils.integrated <- FindClusters(neutrophils.integrated, resolution = 0.5)
+neutrophils.integrated <- RunTSNE(neutrophils.integrated, reduction = "pca", dims = 1:30)
+```
+
+
+```{r}
+p1 <- DimPlot(neutrophils.integrated, reduction = "tsne", group.by = "group")
+plot_grid(p1)
+```
+```{r}
+saveRDS(neutrophils.seu, file = "/Users/liammagee/Desktop/R stuff/tumorSet/Neutrophils.rds")
+```
+
+```{r}
+neutrophils.markers <- FindAllMarkers(neutrophils.integrated, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+neutrophils.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC)
+```
+```{r}
+neutrophils.query <- reference.list[["group"]]
+neutrophils.anchors <- FindTransferAnchors(reference = neutrophils.integrated, query = neutrophils.integrated$group, dims = 1:30)
+predictions <- TransferData(anchorset = neutrophils.anchors, refdata = neutrophils.integrated$group, dims = 1:30)
+neutrophils.query <- AddMetaData(neutrophil.query, metadata = predictions)
+```
+
+
+
+
+
