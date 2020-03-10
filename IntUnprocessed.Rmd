@@ -4,9 +4,11 @@ output: html_document
 ---
 
 ```{r}
-#pushing to try develop
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+
+
 ```{r}
 # SEURAT WORKFLOW (w/tSNE): https://satijalab.org/seurat/v3.1/pbmc3k_tutorial.html
 
@@ -184,6 +186,9 @@ neutrophils.integrated <- RunTSNE(neutrophils.integrated, reduction = "pca", dim
 p1 <- DimPlot(neutrophils.integrated, reduction = "tsne", group.by = "group")
 plot_grid(p1)
 ```
+tumor.markers = FindMarkers(neutrophil.integrated, ident.1 = 'tumor', assay = 'RNA', group.by = 'group')
+
+
 ```{r}
 saveRDS(neutrophils.seu, file = "/Users/liammagee/Desktop/R stuff/tumorSet/Neutrophils.rds")
 ```
@@ -198,3 +203,26 @@ neutrophils.anchors <- FindTransferAnchors(reference = neutrophils.integrated, q
 predictions <- TransferData(anchorset = neutrophils.anchors, refdata = neutrophils.integrated$group, dims = 1:30)
 neutrophils.query <- AddMetaData(neutrophil.query, metadata = predictions)
 ```
+```{r}
+#SCT Transform Algorithm 
+
+groups <- sample(c("healthy", "adjacent", "contralateral", "tumor"), size = 25633, replace = TRUE)
+names(groups) <- colnames(neutrophils.seu)
+neutrophils.seu <- AddMetaData(object = neutrophils.seu, metadata = groups, col.name = "group")
+obj.list <- SplitObject(neutrophils.seu, split.by = "group")
+for (i in names(obj.list)) {
+    obj.list[[i]] <- SCTransform(obj.list[[i]], verbose = FALSE)
+}
+neutrophil.features <- SelectIntegrationFeatures(object.list = obj.list, nfeatures = 3000)
+neutrophil.list <- PrepSCTIntegration(object.list = obj.list, anchor.features = neutrophil.features)
+neutrophil.anchors <- FindIntegrationAnchors(object.list = obj.list, normalization.method = "SCT", 
+    anchor.features = neutrophil.features)
+neutrophil.integrated <- IntegrateData(anchorset = neutrophil.anchors, normalization.method = "SCT")
+
+neutrophil.integrated <- RunPCA(object = neutrophil.integrated, verbose = FALSE)
+neutrophil.integrated <- RunUMAP(object = neutrophil.integrated, dims = 1:30)
+```
+
+
+
+
