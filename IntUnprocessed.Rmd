@@ -203,7 +203,7 @@ neutrophils.anchors <- FindTransferAnchors(reference = neutrophils.integrated, q
 predictions <- TransferData(anchorset = neutrophils.anchors, refdata = neutrophils.integrated$group, dims = 1:30)
 neutrophils.query <- AddMetaData(neutrophil.query, metadata = predictions)
 ```
-
+```{r}
 #SCT Transform Algorithm 
 
 groups <- sample(c("healthy", "adjacent", "contralateral", "tumor"), size = 25633, replace = TRUE)
@@ -221,6 +221,9 @@ neutrophil.integrated <- IntegrateData(anchorset = neutrophil.anchors, normaliza
 
 neutrophil.integrated <- RunPCA(object = neutrophil.integrated, verbose = FALSE)
 neutrophil.integrated <- RunUMAP(object = neutrophil.integrated, dims = 1:30)
+```
+
+
 
 
 
